@@ -2,6 +2,10 @@ from ast_nodes import (
     Assignment,
     ASTNode,
     BinaryExpr,
+    BreakStmt,
+    ContinueStmt,
+    DoWhileStmt,
+    ForStmt,
     FuncDecl,
     FunctionCall,
     Identifier,
@@ -39,10 +43,12 @@ class CGenerator:
     def generate(self, program: Program) -> str:
         self.collect_function_signatures(program)
         function_declarations = []
+        function_prototypes = []
         main_statements = []
 
         for statement in program.statements:
             if isinstance(statement, FuncDecl):
+                function_prototypes.append(self.generate_function_prototype(statement))
                 function_declarations.append(self.generate_function(statement))
             else:
                 main_statements.append(statement)
@@ -53,6 +59,10 @@ class CGenerator:
             "#include <math.h>",
             "",
         ]
+
+        if function_prototypes:
+            lines.extend(function_prototypes)
+            lines.append("")
 
         if function_declarations:
             lines.extend(function_declarations)
@@ -76,9 +86,8 @@ class CGenerator:
                 self.function_return_types[statement.name] = statement.return_type
 
     def generate_function(self, node: FuncDecl) -> str:
-        return_type = self.c_type(node.return_type)
-        params = ", ".join(f"{self.c_type(param.type)} {param.name}" for param in node.parameters)
-        lines = [f"{return_type} {node.name}({params}) {{"]
+        signature = self.generate_function_signature(node)
+        lines = [f"{signature} {{"]
 
         self.push_scope()
         previous_return_type = self.current_return_type
@@ -94,6 +103,14 @@ class CGenerator:
 
         lines.append("}")
         return "\n".join(lines)
+
+    def generate_function_prototype(self, node: FuncDecl) -> str:
+        return f"{self.generate_function_signature(node)};"
+
+    def generate_function_signature(self, node: FuncDecl) -> str:
+        return_type = self.c_type(node.return_type)
+        params = ", ".join(f"{self.c_type(param.type)} {param.name}" for param in node.parameters)
+        return f"{return_type} {node.name}({params})"
 
     def generate_statement(self, node: ASTNode, indent: int) -> list[str]:
         prefix = "    " * indent
@@ -149,6 +166,26 @@ class CGenerator:
                 self.pop_scope()
             lines.append(f"{prefix}}}")
             return lines
+
+        if isinstance(node, DoWhileStmt):
+            lines = [f"{prefix}do {{"]
+            self.push_scope()
+            try:
+                for statement in node.body:
+                    lines.extend(self.generate_statement(statement, indent + 1))
+            finally:
+                self.pop_scope()
+            lines.append(f"{prefix}}} while ({self.generate_expression(node.condition)});")
+            return lines
+
+        if isinstance(node, ForStmt):
+            raise CGeneratorError("TODO: geracao de C para ForStmt for-in ainda nao implementada.")
+
+        if isinstance(node, BreakStmt):
+            return [f"{prefix}break;"]
+
+        if isinstance(node, ContinueStmt):
+            return [f"{prefix}continue;"]
 
         if isinstance(node, ReturnStmt):
             if node.value is None:

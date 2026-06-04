@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 
+int fatorial(int n);
+
 int fatorial(int n) {
     int resultado = 1;
     while ((n > 1)) {
