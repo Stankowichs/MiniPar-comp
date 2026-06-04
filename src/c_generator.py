@@ -20,6 +20,8 @@ from ast_nodes import (
     PropertyAccess,
     PropertyAssign,
     ReturnStmt,
+    ParBlock,
+    SeqBlock,
     ThisExpr,
     UnaryExpr,
     VarDecl,
@@ -49,9 +51,13 @@ class CGenerator:
         self.scopes: list[dict[str, str]] = []
         self.current_return_type: str | None = None
         self.current_class_name: str | None = None
+        self.has_par = False
+        self.par_task_counter = 0
+        self.par_task_definitions: list[str] = []
 
     def generate(self, program: Program) -> str:
         self.collect_declarations(program)
+        self.has_par = self.contains_par_block(program)
         class_declarations = []
         method_prototypes = []
         method_declarations = []
@@ -71,12 +77,22 @@ class CGenerator:
             else:
                 main_statements.append(statement)
 
+        self.push_scope()
+        try:
+            main_body = []
+            for statement in main_statements:
+                main_body.extend(self.generate_statement(statement, indent=1))
+        finally:
+            self.pop_scope()
+
         lines = [
             "#include <stdio.h>",
             "#include <stdlib.h>",
             "#include <math.h>",
-            "",
         ]
+        if self.has_par:
+            lines.append("#include <pthread.h>")
+        lines.append("")
 
         if class_declarations:
             lines.extend(class_declarations)
@@ -92,15 +108,14 @@ class CGenerator:
             lines.extend(declarations)
             lines.append("")
 
-        self.push_scope()
-        try:
-            lines.append("int main() {")
-            for statement in main_statements:
-                lines.extend(self.generate_statement(statement, indent=1))
-            lines.append("    return 0;")
-            lines.append("}")
-        finally:
-            self.pop_scope()
+        if self.par_task_definitions:
+            lines.extend(self.par_task_definitions)
+            lines.append("")
+
+        lines.append("int main() {")
+        lines.extend(main_body)
+        lines.append("    return 0;")
+        lines.append("}")
 
         return "\n".join(lines) + "\n"
 
@@ -112,6 +127,15 @@ class CGenerator:
                 self.classes[statement.name] = statement
                 for method in statement.methods:
                     self.method_return_types[(statement.name, method.name)] = method.return_type
+
+    def contains_par_block(self, node) -> bool:
+        if isinstance(node, ParBlock):
+            return True
+        if isinstance(node, list):
+            return any(self.contains_par_block(item) for item in node)
+        if not hasattr(node, "__dataclass_fields__"):
+            return False
+        return any(self.contains_par_block(getattr(node, field)) for field in node.__dataclass_fields__)
 
     def generate_class_struct(self, node: ClassDecl) -> str:
         lines = ["typedef struct {"]
@@ -256,6 +280,20 @@ class CGenerator:
             lines.append(f"{prefix}}} while ({self.generate_expression(node.condition)});")
             return lines
 
+        if isinstance(node, SeqBlock):
+            lines = [f"{prefix}{{"]
+            self.push_scope()
+            try:
+                for statement in node.statements:
+                    lines.extend(self.generate_statement(statement, indent + 1))
+            finally:
+                self.pop_scope()
+            lines.append(f"{prefix}}}")
+            return lines
+
+        if isinstance(node, ParBlock):
+            return self.generate_par_block(node, indent)
+
         if isinstance(node, ForStmt):
             raise CGeneratorError("TODO: geracao de C para ForStmt for-in ainda nao implementada.")
 
@@ -277,6 +315,37 @@ class CGenerator:
             return [f"{prefix}{self.generate_expression(node)};"]
 
         raise CGeneratorError(f"Geracao de C nao implementada para no: {type(node).__name__}")
+
+    def generate_par_block(self, node: ParBlock, indent: int) -> list[str]:
+        prefix = "    " * indent
+        task_names = []
+
+        for statement in node.statements:
+            task_name = f"__par_task_{self.par_task_counter}"
+            self.par_task_counter += 1
+            task_names.append(task_name)
+            self.par_task_definitions.append(self.generate_par_task(task_name, statement))
+
+        lines = [f"{prefix}{{"]
+        for index, _task_name in enumerate(task_names):
+            lines.append(f"{prefix}    pthread_t __t{index};")
+        for index, task_name in enumerate(task_names):
+            lines.append(f"{prefix}    pthread_create(&__t{index}, NULL, {task_name}, NULL);")
+        for index, _task_name in enumerate(task_names):
+            lines.append(f"{prefix}    pthread_join(__t{index}, NULL);")
+        lines.append(f"{prefix}}}")
+        return lines
+
+    def generate_par_task(self, task_name: str, statement: ASTNode) -> str:
+        lines = [f"void* {task_name}(void* arg) {{", "    (void)arg;"]
+        self.push_scope()
+        try:
+            lines.extend(self.generate_statement(statement, indent=1))
+        finally:
+            self.pop_scope()
+        lines.append("    return NULL;")
+        lines.append("}")
+        return "\n".join(lines)
 
     def generate_expression(self, node: ASTNode) -> str:
         if isinstance(node, Literal):

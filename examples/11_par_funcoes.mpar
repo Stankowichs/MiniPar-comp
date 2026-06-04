@@ -1,0 +1,12 @@
+func tarefa1() -> void {
+    print(100);
+}
+
+func tarefa2() -> void {
+    print(200);
+}
+
+par {
+    tarefa1();
+    tarefa2();
+}

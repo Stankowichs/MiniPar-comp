@@ -1,0 +1,31 @@
+func mostrar_fatorial() -> void {
+    int n = 5;
+    int r = 1;
+
+    while (n > 1) {
+        r = r * n;
+        n = n - 1;
+    }
+
+    print(r);
+}
+
+func mostrar_fibonacci() -> void {
+    int n = 5;
+    int a = 0;
+    int b = 1;
+    int i = 0;
+
+    while (i < n) {
+        print(a);
+        int proximo = a + b;
+        a = b;
+        b = proximo;
+        i = i + 1;
+    }
+}
+
+par {
+    mostrar_fatorial();
+    mostrar_fibonacci();
+}

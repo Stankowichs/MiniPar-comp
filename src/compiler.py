@@ -81,7 +81,7 @@ def executable_path_for(c_path: Path) -> Path:
 
 def run_gcc(c_path: Path, executable_path: Path) -> int:
     executable_path.parent.mkdir(parents=True, exist_ok=True)
-    command = ["gcc", str(c_path), "-o", str(executable_path), "-lm"]
+    command = ["gcc", "-O2", str(c_path), "-o", str(executable_path), "-lm", "-pthread"]
 
     try:
         compile_result = subprocess.run(command, text=True, capture_output=True)
