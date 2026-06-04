@@ -3,6 +3,7 @@ from ast_nodes import (
     ASTNode,
     BinaryExpr,
     BreakStmt,
+    CanalDecl,
     ClassDecl,
     ContinueStmt,
     DoWhileStmt,
@@ -21,7 +22,9 @@ from ast_nodes import (
     PropertyAssign,
     ReturnStmt,
     ParBlock,
+    ReceiveStmt,
     SeqBlock,
+    SendStmt,
     ThisExpr,
     UnaryExpr,
     VarDecl,
@@ -52,12 +55,15 @@ class CGenerator:
         self.current_return_type: str | None = None
         self.current_class_name: str | None = None
         self.has_par = False
+        self.has_channel = False
         self.par_task_counter = 0
         self.par_task_definitions: list[str] = []
+        self.recv_buffer_counter = 0
 
     def generate(self, program: Program) -> str:
         self.collect_declarations(program)
         self.has_par = self.contains_par_block(program)
+        self.has_channel = self.contains_channel_node(program)
         class_declarations = []
         method_prototypes = []
         method_declarations = []
@@ -92,6 +98,8 @@ class CGenerator:
         ]
         if self.has_par:
             lines.append("#include <pthread.h>")
+        if self.has_channel:
+            lines.append('#include "minipar_runtime.h"')
         lines.append("")
 
         if class_declarations:
@@ -136,6 +144,15 @@ class CGenerator:
         if not hasattr(node, "__dataclass_fields__"):
             return False
         return any(self.contains_par_block(getattr(node, field)) for field in node.__dataclass_fields__)
+
+    def contains_channel_node(self, node) -> bool:
+        if isinstance(node, (CanalDecl, SendStmt, ReceiveStmt)):
+            return True
+        if isinstance(node, list):
+            return any(self.contains_channel_node(item) for item in node)
+        if not hasattr(node, "__dataclass_fields__"):
+            return False
+        return any(self.contains_channel_node(getattr(node, field)) for field in node.__dataclass_fields__)
 
     def generate_class_struct(self, node: ClassDecl) -> str:
         lines = ["typedef struct {"]
@@ -227,6 +244,15 @@ class CGenerator:
             target = self.generate_property_target(node.object, node.property_name)
             return [f"{prefix}{target} = {self.generate_expression(node.value)};"]
 
+        if isinstance(node, CanalDecl):
+            return [f"{prefix}/* c_channel {', '.join(node.nomes)} */"]
+
+        if isinstance(node, SendStmt):
+            return self.generate_send_statement(node, indent)
+
+        if isinstance(node, ReceiveStmt):
+            return self.generate_receive_statement(node, indent)
+
         if isinstance(node, PrintStmt):
             lines = []
             for argument in node.arguments:
@@ -315,6 +341,28 @@ class CGenerator:
             return [f"{prefix}{self.generate_expression(node)};"]
 
         raise CGeneratorError(f"Geracao de C nao implementada para no: {type(node).__name__}")
+
+    def generate_send_statement(self, node: SendStmt, indent: int) -> list[str]:
+        prefix = "    " * indent
+        if len(node.arguments) != 3:
+            raise CGeneratorError("send espera argumentos: host, porta, mensagem")
+        host = self.generate_expression(node.arguments[0])
+        port = self.generate_expression(node.arguments[1])
+        message = self.generate_expression(node.arguments[2])
+        return [f"{prefix}mp_send({host}, {port}, {message});"]
+
+    def generate_receive_statement(self, node: ReceiveStmt, indent: int) -> list[str]:
+        prefix = "    " * indent
+        if len(node.arguments) != 1:
+            raise CGeneratorError("receive espera argumento: porta")
+        port = self.generate_expression(node.arguments[0])
+        buffer_name = f"__recv_buffer_{self.recv_buffer_counter}"
+        self.recv_buffer_counter += 1
+        return [
+            f"{prefix}char {buffer_name}[1024];",
+            f"{prefix}mp_receive({port}, {buffer_name}, 1024);",
+            f'{prefix}printf("%s\\n", {buffer_name});',
+        ]
 
     def generate_par_block(self, node: ParBlock, indent: int) -> list[str]:
         prefix = "    " * indent
