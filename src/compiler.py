@@ -1,9 +1,12 @@
 import argparse
+import subprocess
+import sys
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
 from ast_nodes import ASTNode
+from c_generator import CGenerator
 from errors import CompilerError
 from lexer import Lexer
 from parser import Parser
@@ -39,6 +42,8 @@ def format_ast(value: Any, indent: int = 0) -> str:
         lines.append(f"{prefix})")
         return "\n".join(lines)
 
+    return repr(value)
+
 
 def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -56,16 +61,60 @@ def run_semantic(ast: ASTNode):
     return SemanticAnalyzer().analyze(ast)
 
 
+def generate_c(ast: ASTNode) -> str:
+    return CGenerator().generate(ast)
+
+
+def write_c_file(path: Path, code: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(code, encoding="utf-8")
+
+
+def default_c_output_path(source_path: Path) -> Path:
+    return Path("output") / f"{source_path.stem}.c"
+
+
+def executable_path_for(c_path: Path) -> Path:
+    suffix = ".exe" if sys.platform.startswith("win") else ""
+    return c_path.with_suffix(suffix)
+
+
+def run_gcc(c_path: Path, executable_path: Path) -> int:
+    executable_path.parent.mkdir(parents=True, exist_ok=True)
+    command = ["gcc", str(c_path), "-o", str(executable_path), "-lm"]
+
+    try:
+        compile_result = subprocess.run(command, text=True, capture_output=True)
+    except FileNotFoundError:
+        print("GCC não encontrado. Instale o GCC ou adicione ao PATH.")
+        return 1
+
+    if compile_result.returncode != 0:
+        print("Erro ao compilar com GCC.")
+        if compile_result.stdout:
+            print(compile_result.stdout, end="")
+        if compile_result.stderr:
+            print(compile_result.stderr, end="")
+        return compile_result.returncode
+
+    run_result = subprocess.run([str(executable_path)], text=True, capture_output=True)
+    if run_result.stdout:
+        print(run_result.stdout, end="")
+    if run_result.stderr:
+        print(run_result.stderr, end="")
+    return run_result.returncode
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="CLI principal do front-end MiniPar: lexer, parser e analisador semantico."
+        description="CLI principal do front-end MiniPar: lexer, parser, semantico e backend C minimo."
     )
     parser.add_argument("source", help="Arquivo .mpar de entrada.")
     parser.add_argument("--tokens", action="store_true", help="Imprime a lista de tokens gerada pelo lexer.")
     parser.add_argument("--ast", action="store_true", help="Imprime a AST gerada pelo parser.")
     parser.add_argument("--check", action="store_true", help="Executa lexer, parser e analise semantica.")
-    parser.add_argument("--emit-c", action="store_true", help="Placeholder para geracao de codigo C.")
-    parser.add_argument("--run", action="store_true", help="Placeholder para execucao via GCC.")
+    parser.add_argument("--emit-c", metavar="CAMINHO", help="Gera codigo C e salva no caminho informado.")
+    parser.add_argument("--run", action="store_true", help="Gera C, compila com GCC e executa o binario.")
     return parser
 
 
@@ -85,23 +134,33 @@ def main() -> int:
             for token in tokens:
                 print(token)
 
-        needs_ast = args.ast or args.check
+        needs_ast = args.ast or args.check or args.emit_c or args.run
         ast = run_parser(tokens) if needs_ast else None
 
         if args.ast and ast is not None:
             print(format_ast(ast))
 
-        if args.check:
+        if args.check or args.emit_c or args.run:
             if ast is None:
                 ast = run_parser(tokens)
             run_semantic(ast)
-            print("OK: analise lexica, sintatica e semantica concluidas com sucesso.")
+            if args.check:
+                print("OK: analise lexica, sintatica e semantica concluidas com sucesso.")
 
         if args.emit_c:
-            print("TODO: geração de código C ainda não implementada.")
+            if ast is None:
+                ast = run_parser(tokens)
+            c_output_path = Path(args.emit_c)
+            write_c_file(c_output_path, generate_c(ast))
+            print(f"C gerado em: {c_output_path}")
 
         if args.run:
-            print("TODO: execução via GCC ainda não implementada.")
+            if ast is None:
+                ast = run_parser(tokens)
+            c_output_path = default_c_output_path(source_path)
+            executable_path = executable_path_for(c_output_path)
+            write_c_file(c_output_path, generate_c(ast))
+            return run_gcc(c_output_path, executable_path)
 
         if not any([args.tokens, args.ast, args.check, args.emit_c, args.run]):
             ast = run_parser(tokens)
