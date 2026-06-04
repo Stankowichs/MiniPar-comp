@@ -3,6 +3,7 @@ from ast_nodes import (
     ASTNode,
     BinaryExpr,
     BreakStmt,
+    ClassDecl,
     ContinueStmt,
     DoWhileStmt,
     ForStmt,
@@ -11,9 +12,15 @@ from ast_nodes import (
     Identifier,
     IfStmt,
     Literal,
+    MethodCall,
+    MethodDecl,
+    NewInstance,
     PrintStmt,
     Program,
+    PropertyAccess,
+    PropertyAssign,
     ReturnStmt,
+    ThisExpr,
     UnaryExpr,
     VarDecl,
     WhileStmt,
@@ -36,18 +43,29 @@ class CGeneratorError(CompilerError):
 
 class CGenerator:
     def __init__(self):
+        self.classes: dict[str, ClassDecl] = {}
         self.function_return_types: dict[str, str] = {}
+        self.method_return_types: dict[tuple[str, str], str] = {}
         self.scopes: list[dict[str, str]] = []
         self.current_return_type: str | None = None
+        self.current_class_name: str | None = None
 
     def generate(self, program: Program) -> str:
-        self.collect_function_signatures(program)
+        self.collect_declarations(program)
+        class_declarations = []
+        method_prototypes = []
+        method_declarations = []
         function_declarations = []
         function_prototypes = []
         main_statements = []
 
         for statement in program.statements:
-            if isinstance(statement, FuncDecl):
+            if isinstance(statement, ClassDecl):
+                class_declarations.append(self.generate_class_struct(statement))
+                for method in statement.methods:
+                    method_prototypes.append(self.generate_method_prototype(statement, method))
+                    method_declarations.append(self.generate_method(statement, method))
+            elif isinstance(statement, FuncDecl):
                 function_prototypes.append(self.generate_function_prototype(statement))
                 function_declarations.append(self.generate_function(statement))
             else:
@@ -60,12 +78,18 @@ class CGenerator:
             "",
         ]
 
-        if function_prototypes:
-            lines.extend(function_prototypes)
+        if class_declarations:
+            lines.extend(class_declarations)
             lines.append("")
 
-        if function_declarations:
-            lines.extend(function_declarations)
+        prototypes = method_prototypes + function_prototypes
+        if prototypes:
+            lines.extend(prototypes)
+            lines.append("")
+
+        declarations = method_declarations + function_declarations
+        if declarations:
+            lines.extend(declarations)
             lines.append("")
 
         self.push_scope()
@@ -80,10 +104,24 @@ class CGenerator:
 
         return "\n".join(lines) + "\n"
 
-    def collect_function_signatures(self, program: Program) -> None:
+    def collect_declarations(self, program: Program) -> None:
         for statement in program.statements:
             if isinstance(statement, FuncDecl):
                 self.function_return_types[statement.name] = statement.return_type
+            elif isinstance(statement, ClassDecl):
+                self.classes[statement.name] = statement
+                for method in statement.methods:
+                    self.method_return_types[(statement.name, method.name)] = method.return_type
+
+    def generate_class_struct(self, node: ClassDecl) -> str:
+        lines = ["typedef struct {"]
+        if node.attributes:
+            for attribute in node.attributes:
+                lines.append(f"    {self.c_type(attribute.type)} {attribute.name};")
+        else:
+            lines.append("    int __dummy;")
+        lines.append(f"}} {node.name};")
+        return "\n".join(lines)
 
     def generate_function(self, node: FuncDecl) -> str:
         signature = self.generate_function_signature(node)
@@ -112,6 +150,38 @@ class CGenerator:
         params = ", ".join(f"{self.c_type(param.type)} {param.name}" for param in node.parameters)
         return f"{return_type} {node.name}({params})"
 
+    def generate_method(self, class_node: ClassDecl, method: MethodDecl) -> str:
+        signature = self.generate_method_signature(class_node, method)
+        lines = [f"{signature} {{"]
+
+        self.push_scope()
+        previous_return_type = self.current_return_type
+        previous_class_name = self.current_class_name
+        self.current_return_type = method.return_type
+        self.current_class_name = class_node.name
+        try:
+            lines.append("    (void)self;")
+            for param in method.parameters:
+                self.define_variable(param.name, param.type)
+            for statement in method.body:
+                lines.extend(self.generate_statement(statement, indent=1))
+        finally:
+            self.current_return_type = previous_return_type
+            self.current_class_name = previous_class_name
+            self.pop_scope()
+
+        lines.append("}")
+        return "\n".join(lines)
+
+    def generate_method_prototype(self, class_node: ClassDecl, method: MethodDecl) -> str:
+        return f"{self.generate_method_signature(class_node, method)};"
+
+    def generate_method_signature(self, class_node: ClassDecl, method: MethodDecl) -> str:
+        return_type = self.c_type(method.return_type)
+        params = [f"{class_node.name}* self"]
+        params.extend(f"{self.c_type(param.type)} {param.name}" for param in method.parameters)
+        return f"{return_type} {class_node.name}_{method.name}({', '.join(params)})"
+
     def generate_statement(self, node: ASTNode, indent: int) -> list[str]:
         prefix = "    " * indent
 
@@ -120,10 +190,18 @@ class CGenerator:
             self.define_variable(node.name, node.type)
             if node.initializer is None:
                 return [f"{prefix}{c_type} {node.name};"]
+            if isinstance(node.initializer, NewInstance):
+                if node.initializer.arguments:
+                    return [f"{prefix}{c_type} {node.name}; /* TODO: argumentos de new ignorados */"]
+                return [f"{prefix}{c_type} {node.name};"]
             return [f"{prefix}{c_type} {node.name} = {self.generate_expression(node.initializer)};"]
 
         if isinstance(node, Assignment):
             return [f"{prefix}{node.var_name} = {self.generate_expression(node.value)};"]
+
+        if isinstance(node, PropertyAssign):
+            target = self.generate_property_target(node.object, node.property_name)
+            return [f"{prefix}{target} = {self.generate_expression(node.value)};"]
 
         if isinstance(node, PrintStmt):
             lines = []
@@ -195,6 +273,9 @@ class CGenerator:
         if isinstance(node, (BinaryExpr, UnaryExpr, FunctionCall, Identifier, Literal)):
             return [f"{prefix}{self.generate_expression(node)};"]
 
+        if isinstance(node, (MethodCall, PropertyAccess, NewInstance, ThisExpr)):
+            return [f"{prefix}{self.generate_expression(node)};"]
+
         raise CGeneratorError(f"Geracao de C nao implementada para no: {type(node).__name__}")
 
     def generate_expression(self, node: ASTNode) -> str:
@@ -203,6 +284,9 @@ class CGenerator:
 
         if isinstance(node, Identifier):
             return node.name
+
+        if isinstance(node, ThisExpr):
+            return "self"
 
         if isinstance(node, BinaryExpr):
             left = self.generate_expression(node.left)
@@ -221,7 +305,38 @@ class CGenerator:
             args = ", ".join(self.generate_expression(argument) for argument in node.arguments)
             return f"{node.function_name}({args})"
 
+        if isinstance(node, MethodCall):
+            object_type = self.infer_type(node.object)
+            if object_type is None:
+                raise CGeneratorError(f"Nao foi possivel inferir o tipo do objeto para metodo '{node.method_name}'")
+            receiver = self.generate_method_receiver(node.object)
+            args = [receiver]
+            args.extend(self.generate_expression(argument) for argument in node.arguments)
+            return f"{object_type}_{node.method_name}({', '.join(args)})"
+
+        if isinstance(node, PropertyAccess):
+            return self.generate_property_target(node.object, node.property_name)
+
+        if isinstance(node, PropertyAssign):
+            target = self.generate_property_target(node.object, node.property_name)
+            return f"({target} = {self.generate_expression(node.value)})"
+
+        if isinstance(node, NewInstance):
+            if node.arguments:
+                raise CGeneratorError("TODO: argumentos em NewInstance ainda nao implementados.")
+            return f"({node.class_name}){{0}}"
+
         raise CGeneratorError(f"Geracao de expressao C nao implementada para no: {type(node).__name__}")
+
+    def generate_property_target(self, object_node: ASTNode, property_name: str) -> str:
+        if isinstance(object_node, ThisExpr):
+            return f"self->{property_name}"
+        return f"{self.generate_expression(object_node)}.{property_name}"
+
+    def generate_method_receiver(self, object_node: ASTNode) -> str:
+        if isinstance(object_node, ThisExpr):
+            return "self"
+        return f"&{self.generate_expression(object_node)}"
 
     def generate_literal(self, node: Literal) -> str:
         if isinstance(node.value, bool):
@@ -246,6 +361,28 @@ class CGenerator:
 
         if isinstance(node, FunctionCall):
             return self.function_return_types.get(node.function_name)
+
+        if isinstance(node, MethodCall):
+            object_type = self.infer_type(node.object)
+            if object_type is None:
+                return None
+            return self.method_return_types.get((object_type, node.method_name))
+
+        if isinstance(node, PropertyAccess):
+            object_type = self.infer_type(node.object)
+            class_node = self.classes.get(object_type) if object_type else None
+            if class_node is None:
+                return None
+            for attribute in class_node.attributes:
+                if attribute.name == node.property_name:
+                    return attribute.type
+            return None
+
+        if isinstance(node, ThisExpr):
+            return self.current_class_name
+
+        if isinstance(node, NewInstance):
+            return node.class_name
 
         if isinstance(node, UnaryExpr):
             return self.infer_type(node.operand)
@@ -274,6 +411,8 @@ class CGenerator:
         return "%d"
 
     def c_type(self, type_name: str) -> str:
+        if type_name in self.classes:
+            return type_name
         if type_name not in TYPE_MAP:
             raise CGeneratorError(f"Tipo nao suportado na geracao de C: '{type_name}'")
         return TYPE_MAP[type_name]

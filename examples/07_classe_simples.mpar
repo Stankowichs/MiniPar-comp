@@ -1,0 +1,11 @@
+class Pessoa {
+    int idade;
+
+    int getIdade() {
+        return this.idade;
+    }
+}
+
+Pessoa p = new Pessoa();
+p.idade = 20;
+print(p.getIdade());

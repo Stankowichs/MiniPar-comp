@@ -1,0 +1,15 @@
+class Neuronio {
+    number peso;
+
+    number ativacao(number soma) {
+        if (soma >= 0) {
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+}
+
+Neuronio n = new Neuronio();
+n.peso = 0.5;
+print(n.ativacao(1));

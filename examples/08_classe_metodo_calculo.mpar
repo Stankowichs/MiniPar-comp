@@ -1,0 +1,8 @@
+class Calculadora {
+    int dobro(int x) {
+        return x * 2;
+    }
+}
+
+Calculadora c = new Calculadora();
+print(c.dobro(7));
