@@ -4,7 +4,14 @@ from symbol_table import ClassSymbol, MethodSymbol, SymbolTable, VariableSymbol
 
 
 BUILTIN_TYPES = {"int", "number", "string", "bool", "void", "list", "dict"}
-BUILTIN_FUNCTIONS = {"input", "readln", "readNumber"}
+BUILTIN_FUNCTIONS = {
+    "input": None,
+    "readln": 0,
+    "readNumber": 0,
+    "mp_fractal_init": 0,
+    "mp_fractal_set": 3,
+    "mp_fractal_print": 0,
+}
 
 
 class SemanticAnalyzer:
@@ -202,6 +209,12 @@ class SemanticAnalyzer:
 
     def visit_FunctionCall(self, node: FunctionCall):
         if node.function_name in BUILTIN_FUNCTIONS:
+            expected_arguments = BUILTIN_FUNCTIONS[node.function_name]
+            if expected_arguments is not None and len(node.arguments) != expected_arguments:
+                raise SemanticError(
+                    f"Quantidade errada de argumentos em '{node.function_name}': "
+                    f"esperado {expected_arguments}, recebido {len(node.arguments)}"
+                )
             for arg in node.arguments:
                 self.visit(arg)
             return

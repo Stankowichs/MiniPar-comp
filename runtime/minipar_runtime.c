@@ -127,3 +127,35 @@ void mp_receive(int port, char* buffer, int buffer_size) {
     mp_close_socket(client_fd);
     mp_close_socket(server_fd);
 }
+
+static char mp_fractal_matrix[27][27];
+
+void mp_fractal_init(void) {
+    int i;
+    int j;
+
+    for (i = 0; i < 27; i++) {
+        for (j = 0; j < 27; j++) {
+            mp_fractal_matrix[i][j] = '*';
+        }
+    }
+}
+
+void mp_fractal_set(int i, int j, char value) {
+    if (i < 0 || i >= 27 || j < 0 || j >= 27) {
+        return;
+    }
+    mp_fractal_matrix[i][j] = value;
+}
+
+void mp_fractal_print(void) {
+    int i;
+    int j;
+
+    for (i = 0; i < 27; i++) {
+        for (j = 0; j < 27; j++) {
+            putchar(mp_fractal_matrix[i][j]);
+        }
+        putchar('\n');
+    }
+}

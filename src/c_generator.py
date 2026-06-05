@@ -56,6 +56,7 @@ class CGenerator:
         self.current_class_name: str | None = None
         self.has_par = False
         self.has_channel = False
+        self.has_fractal = False
         self.par_task_counter = 0
         self.par_task_definitions: list[str] = []
         self.recv_buffer_counter = 0
@@ -64,6 +65,7 @@ class CGenerator:
         self.collect_declarations(program)
         self.has_par = self.contains_par_block(program)
         self.has_channel = self.contains_channel_node(program)
+        self.has_fractal = self.contains_fractal_call(program)
         class_declarations = []
         method_prototypes = []
         method_declarations = []
@@ -98,7 +100,7 @@ class CGenerator:
         ]
         if self.has_par:
             lines.append("#include <pthread.h>")
-        if self.has_channel:
+        if self.has_channel or self.has_fractal:
             lines.append('#include "minipar_runtime.h"')
         lines.append("")
 
@@ -153,6 +155,19 @@ class CGenerator:
         if not hasattr(node, "__dataclass_fields__"):
             return False
         return any(self.contains_channel_node(getattr(node, field)) for field in node.__dataclass_fields__)
+
+    def contains_fractal_call(self, node) -> bool:
+        if isinstance(node, FunctionCall) and node.function_name in {
+            "mp_fractal_init",
+            "mp_fractal_set",
+            "mp_fractal_print",
+        }:
+            return True
+        if isinstance(node, list):
+            return any(self.contains_fractal_call(item) for item in node)
+        if not hasattr(node, "__dataclass_fields__"):
+            return False
+        return any(self.contains_fractal_call(getattr(node, field)) for field in node.__dataclass_fields__)
 
     def generate_class_struct(self, node: ClassDecl) -> str:
         lines = ["typedef struct {"]
