@@ -1,0 +1,43 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include "minipar_runtime.h"
+
+void preencherCentro(int x, int y, int bloco);
+void desenharTapete(int x, int y, int tamanho, int grau);
+
+void preencherCentro(int x, int y, int bloco) {
+    int i = (x + bloco);
+    int limiteI = (x + (2 * bloco));
+    while ((i < limiteI)) {
+        int j = (y + bloco);
+        int limiteJ = (y + (2 * bloco));
+        while ((j < limiteJ)) {
+            mp_fractal_set(i, j, 46);
+            j = (j + 1);
+        }
+        i = (i + 1);
+    }
+}
+void desenharTapete(int x, int y, int tamanho, int grau) {
+    if ((grau <= 0)) {
+        return;
+    }
+    int bloco = (tamanho / 3);
+    preencherCentro(x, y, bloco);
+    desenharTapete(x, y, bloco, (grau - 1));
+    desenharTapete(x, (y + bloco), bloco, (grau - 1));
+    desenharTapete(x, (y + (2 * bloco)), bloco, (grau - 1));
+    desenharTapete((x + bloco), y, bloco, (grau - 1));
+    desenharTapete((x + bloco), (y + (2 * bloco)), bloco, (grau - 1));
+    desenharTapete((x + (2 * bloco)), y, bloco, (grau - 1));
+    desenharTapete((x + (2 * bloco)), (y + bloco), bloco, (grau - 1));
+    desenharTapete((x + (2 * bloco)), (y + (2 * bloco)), bloco, (grau - 1));
+}
+
+int main() {
+    mp_fractal_init();
+    desenharTapete(0, 0, 27, 3);
+    mp_fractal_print();
+    return 0;
+}

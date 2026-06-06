@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+
+*.exe
+*.o
+*.obj
+
+.vscode/
+.idea/
+
+# Arquivos executáveis gerados no Linux ou MinGW sem extensão
+output/*
+!output/*.c
+!output/.gitkeep

@@ -1,0 +1,3 @@
+c_channel telemetria computador_1 computador_2;
+
+telemetria.send("127.0.0.1", 5002, "PING MINIPAR 5002");

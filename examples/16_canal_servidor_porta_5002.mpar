@@ -1,0 +1,3 @@
+c_channel telemetria computador_1 computador_2;
+
+telemetria.receive(5002);
