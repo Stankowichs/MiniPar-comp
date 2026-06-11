@@ -33,7 +33,8 @@ examples/               Programas MiniPar de demonstração
 examples/erros/         Casos que devem falhar
 output/                 Código C e executáveis gerados
 docs/                   Relatório-base, UML e roteiro
-scripts/test_all.py     Testes automatizados
+scripts/test_all.py     Testes automatizados principais
+scripts/test_channels.py Teste isolado de canais TCP
 ```
 
 ## Uso
@@ -88,7 +89,7 @@ py src/compiler.py examples/02_fatorial.mpar --run
 py scripts/test_all.py
 ```
 
-O script valida os exemplos 01 a 15 e confere casos de erro. Para testar canais separadamente, execute `py scripts/test_channels.py`.
+O script valida os exemplos 01 a 12, o exemplo 15 (`15_fractal_matriz.mpar`) e os casos de erro. Para testar canais separadamente, execute `py scripts/test_channels.py`.
 
 ## Teste manual dos canais
 
